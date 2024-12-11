@@ -1,0 +1,28 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Lock files
+*.lock
+
+# Environment variables
+.env
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test files
+test_*.txt
+*_test.*
