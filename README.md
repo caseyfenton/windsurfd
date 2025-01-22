@@ -1,5 +1,36 @@
 # Windsurf Auto-Execution Daemon
 
+## Installation & Private Access
+
+### Prerequisites
+- GitHub account with repository access
+- Git installed locally
+- GitHub CLI (gh) installed (recommended)
+
+### Access & Installation
+1. Request access to the private repository from the repository owner
+2. Once granted, clone the repository:
+   ```bash
+   # Using GitHub CLI (recommended)
+   gh auth login  # If not already logged in
+   gh repo clone caseyfenton/WindsurfAutoRun
+
+   # Or using HTTPS
+   git clone https://github.com/caseyfenton/WindsurfAutoRun.git
+   ```
+
+3. Set up the required paths:
+   ```bash
+   # Add to your ~/.zshrc or ~/.bashrc
+   export PATH="$HOME/CascadeProjects:$PATH"
+   ```
+
+4. Ensure proper permissions:
+   ```bash
+   chmod +x windsurf_autorun.sh
+   chmod +x check_dns.sh
+   ```
+
 ## IMPORTANT: Always Use Autorun
 When working in a directory monitored by windsurfd-autoexec:
 - NEVER run terminal commands directly
