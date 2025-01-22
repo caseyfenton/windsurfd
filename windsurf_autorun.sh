@@ -74,12 +74,16 @@ fi
 TARGET_FOLDER="$1"
 COMMAND="${2:-}"
 
+# Convert target folder to absolute path using realpath
+TARGET_FOLDER=$(realpath "$TARGET_FOLDER")
+
 # Check if we should stop monitoring
 if [ "$COMMAND" = "stop" ]; then
     stop_monitoring "$TARGET_FOLDER"
 fi
 
-if [[ "$TARGET_FOLDER" != /Users/casey/CascadeProjects/* ]]; then
+CASCADE_PROJECTS_DIR="/Users/casey/CascadeProjects"
+if [[ ! "$TARGET_FOLDER" =~ ^"$CASCADE_PROJECTS_DIR"(/|$) ]]; then
     echo "Error: Target folder must be within the Cascade Projects directory."
     exit 1
 fi
@@ -104,7 +108,7 @@ log_monitor "Starting monitor for $TARGET_FOLDER"
 # Start monitoring autorun.sh for changes in the target folder
 while true; do
     if [ "$(dirname $(realpath "$TARGET_FOLDER/autorun.sh"))" = "$TARGET_FOLDER" ]; then
-        fswatch -1 "$TARGET_FOLDER/autorun.sh" && {
+        /opt/homebrew/bin/fswatch -1 "$TARGET_FOLDER/autorun.sh" && {
             # Capture start time
             start_time=$(date '+%Y-%m-%d %H:%M:%S')
             
