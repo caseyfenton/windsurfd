@@ -10,8 +10,8 @@ Thumbs.db
 # Log files and runtime data
 *.log
 logs/
-*.lock
-autorun_results.txt
+*monitor.lock
+windsurfd-autoexec-results.txt
 
 # Backup directory
 backup/

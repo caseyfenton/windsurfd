@@ -1,0 +1,223 @@
+#!/bin/bash
+
+# Windsurf Daemon (windsurfd) - Monitors and executes commands in specified target folders
+
+# Function to daemonize the process
+daemonize() {
+    if [ -z "$DAEMONIZED" ]; then
+        export DAEMONIZED=1
+        nohup "$0" "$@" </dev/null >/dev/null 2>&1 &
+        echo "Daemon started with PID $!"
+        exit 0
+    fi
+}
+
+# Logging and tracking setup
+setup_logging() {
+    local target_dir="$1"
+    mkdir -p "$target_dir/logs"
+    MONITOR_LOG="$target_dir/logs/windsurfd-monitor.log"
+    EXECUTION_LOG="$target_dir/logs/execution_history.log"
+    LOCK_FILE="$target_dir/windsurfd-monitor.lock"
+    touch "$MONITOR_LOG" "$EXECUTION_LOG"
+}
+
+log_monitor() {
+    local message="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] MONITOR: $message" >> "$MONITOR_LOG"
+}
+
+log_execution() {
+    local status="$1"
+    local exit_code="$2"
+    local message="$3"
+    local error_output="$4"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] EXECUTION: Status=$status, Exit=$exit_code, Message=$message" >> "$EXECUTION_LOG"
+    if [ ! -z "$error_output" ]; then
+        echo "ERROR OUTPUT: $error_output" >> "$EXECUTION_LOG"
+    fi
+}
+
+show_help() {
+    cat << EOF
+Windsurf Daemon (windsurfd) - Command Reference
+
+Usage: windsurfd-autoexec <command> [options] <directory>
+
+Commands:
+  <directory>     Start monitoring the specified directory
+  list            List all active monitors
+  stop            Stop monitoring a directory
+  stopall         Stop all Windsurf Daemon monitors
+  help            Show this help message
+
+Options:
+  -v, --verbose   Show detailed execution information
+  -f, --force     Force start even if lock file exists
+  --no-backup     Don't create backup of existing script
+
+Examples:
+  Start monitoring:    windsurfd-autoexec /path/to/dir
+  List monitors:       windsurfd-autoexec list
+  Stop monitoring:     windsurfd-autoexec stop /path/to/dir
+  Stop all monitors:   windsurfd-autoexec stopall
+  Force start:         windsurfd-autoexec -f /path/to/dir
+
+For more information, see the README.md file.
+EOF
+}
+
+check_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        pid=$(cat "$LOCK_FILE")
+        if ps -p "$pid" > /dev/null; then
+            echo "Error: Windsurf Daemon is already running for this directory (PID: $pid)"
+            exit 1
+        fi
+        rm -f "$LOCK_FILE"
+    fi
+    echo $$ > "$LOCK_FILE"
+}
+
+cleanup() {
+    [ -f "$LOCK_FILE" ] && rm -f "$LOCK_FILE"
+    log_monitor "Daemon stopped"
+    exit 0
+}
+
+stop_monitoring() {
+    local target_dir="$1"
+    if [ -f "$target_dir/windsurfd-monitor.lock" ]; then
+        pid=$(cat "$target_dir/windsurfd-monitor.lock")
+        if ps -p "$pid" > /dev/null; then
+            kill "$pid"
+            echo "Killed process $pid"
+        fi
+        rm -f "$target_dir/windsurfd-monitor.lock"
+        echo "Removed lock file"
+        pkill -f "fswatch.*$target_dir/windsurfd-autoexec.sh"
+        echo "Monitor stopped for $target_dir"
+    else
+        echo "No active monitor found for $target_dir"
+    fi
+}
+
+stopall_monitoring() {
+    echo "Stopping all Windsurf Daemon monitors..."
+    
+    # Kill all fswatch processes for windsurfd-autoexec
+    while true; do
+        PROCS=$(ps aux | grep "[f]swatch.*windsurfd-autoexec.sh")
+        if [ -z "$PROCS" ]; then
+            break
+        fi
+        
+        echo "$PROCS" | while read -r line; do
+            pid=$(echo "$line" | awk '{print $2}')
+            dir=$(echo "$line" | grep -o "/.*windsurfd-autoexec.sh" | sed 's/\/windsurfd-autoexec.sh//')
+            echo "Stopping monitor for $dir (PID: $pid)"
+            kill -9 $pid 2>/dev/null
+            
+            # Remove lock file if it exists
+            if [ -f "$dir/windsurfd-monitor.lock" ]; then
+                rm -f "$dir/windsurfd-monitor.lock"
+                echo "Removed lock file for $dir"
+            fi
+        done
+        
+        # Small delay to let processes terminate
+        sleep 1
+    done
+    
+    # Kill any remaining windsurfd processes
+    pkill -9 -f "windsurfd-autoexec.sh" 2>/dev/null
+    
+    # Clean up any stray lock files in CascadeProjects directory
+    find /Users/casey/CascadeProjects -name "windsurfd-monitor.lock" -delete
+    
+    echo "All monitors have been stopped."
+}
+
+# Parse commands first
+case "$1" in
+    list)
+        echo "Active Windsurf Daemon Monitors:"
+        ps aux | grep "[f]swatch.*windsurfd-autoexec.sh" | while read -r line; do
+            pid=$(echo "$line" | awk '{print $2}')
+            dir=$(echo "$line" | grep -o "/.*windsurfd-autoexec.sh" | sed 's/\/windsurfd-autoexec.sh//')
+            echo "[PID $pid] $dir"
+        done
+        exit 0
+        ;;
+    stop)
+        if [ -z "$2" ]; then
+            echo "Usage: $0 stop <directory>"
+            exit 1
+        fi
+        TARGET_DIR=$(realpath "$2")
+        stop_monitoring "$TARGET_DIR"
+        exit 0
+        ;;
+    stopall)
+        stopall_monitoring
+        exit 0
+        ;;
+    help|--help|-h)
+        show_help
+        exit 0
+        ;;
+esac
+
+# Check if target folder is provided and exists
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 <target_directory> [stop]"
+    echo "For help: $0 help"
+    exit 1
+fi
+
+TARGET_FOLDER="$1"
+COMMAND="${2:-}"
+
+# Initialize logging and lock system
+setup_logging "$TARGET_FOLDER"
+
+# Daemonize if not already done
+[ -z "$DAEMONIZED" ] && daemonize "$@"
+
+check_lock
+
+# Set up cleanup on script exit
+trap cleanup EXIT SIGINT SIGTERM
+
+# Create windsurfd-autoexec.sh if it doesn't exist
+if [ ! -f "$TARGET_FOLDER/windsurfd-autoexec.sh" ]; then
+    cat > "$TARGET_FOLDER/windsurfd-autoexec.sh" << 'EOF'
+#!/bin/bash
+# Windsurf Daemon - Command File
+# Add your commands below. They will be executed automatically when this file is saved.
+EOF
+    chmod +x "$TARGET_FOLDER/windsurfd-autoexec.sh"
+    log_monitor "Created new windsurfd-autoexec.sh file"
+fi
+
+log_monitor "Starting monitor for $TARGET_FOLDER"
+
+# Start monitoring windsurfd-autoexec.sh for changes
+while true; do
+    /opt/homebrew/bin/fswatch -1 "$TARGET_FOLDER/windsurfd-autoexec.sh" > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        # Execute the script and capture output
+        OUTPUT=$(/bin/bash "$TARGET_FOLDER/windsurfd-autoexec.sh" 2>&1)
+        EXIT_CODE=$?
+        
+        # Write output to results file
+        echo "$OUTPUT" > "$TARGET_FOLDER/windsurfd-autoexec-results.txt"
+        
+        # Log execution
+        if [ $EXIT_CODE -eq 0 ]; then
+            log_execution "SUCCESS" "$EXIT_CODE" "Script executed successfully"
+        else
+            log_execution "FAILED" "$EXIT_CODE" "Script execution failed" "$OUTPUT"
+        fi
+    fi
+done

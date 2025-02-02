@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Load config file
+CONFIG_FILE="/Users/casey/CascadeProjects/windsurfd/windsurfd-autoexec.conf"
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+else
+  echo "Config file not found: $CONFIG_FILE"
+  exit 1
+fi
+
+# Daemon PID file
+PID_FILE="/tmp/windsurfd-autoexec.pid"
+
+# Lock file to prevent race conditions
+LOCK_FILE="/tmp/windsurfd-autoexec.lock"
+
+# Log function
+log() {
+  if [ "$debug_mode" == "on" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
+  fi
+}
+
+# Start the daemon
+start_daemon() {
+  if [ -f "$PID_FILE" ]; then
+    echo "Daemon is already running."
+    exit 1
+  fi
+
+  # Start fswatch in the background
+  fswatch -o -e "$exclude_dir" "$root_dir" | while read -r event; do
+    # Acquire lock to prevent race conditions
+    exec 200>"$LOCK_FILE"
+    flock -n 200 || { echo "Another instance is running. Exiting."; exit 1; }
+
+    # Check if the event is related to an autoexec.sh file
+    if [[ "$event" == *"autoexec.sh" ]]; then
+      # Get the directory containing the autoexec.sh file
+      DIR=$(dirname "$event")
+      
+      # Make the autoexec.sh file executable
+      chmod +x "$DIR/autoexec.sh"
+      
+      # Add a comment to the autoexec.sh file
+      echo -e "# I am using AutoExec turned on. I am currently saving and taking action for system commands using the autoexec.sh file.\n# I will continue to check the README file for this project and ensure I have proper context and understand all global rules when making edits, especially large edits to this codebase.\n$(cat "$DIR/autoexec.sh")" > "$DIR/autoexec.sh"
+      
+      # Execute the autoexec.sh script and log the output
+      log "Executing autoexec.sh in $DIR..."
+      cd "$DIR" || { log "Failed to change directory to $DIR"; exit 1; }
+      bash "./autoexec.sh" > autoexec_results.txt 2>&1
+      
+      # Add a comment to the results file
+      echo -e "# I am using AutoExec turned on. I am currently receiving my results from the autoexec_results.txt file.\n# I will continue to check the README file for this project and ensure I have proper context and understand all global rules when making edits, especially large edits to this codebase.\n$(cat autoexec_results.txt)" > autoexec_results.txt
+      
+      log "Execution complete. Results logged to $DIR/autoexec_results.txt."
+    fi
+
+    # Release lock
+    flock -u 200
+  done &
+
+  # Save the PID of the background process
+  echo $! > "$PID_FILE"
+  log "Daemon started."
+}
+
+# Stop the daemon
+stop_daemon() {
+  if [ ! -f "$PID_FILE" ]; then
+    echo "Daemon is not running."
+    exit 1
+  fi
+
+  # Kill the background process
+  kill $(cat "$PID_FILE")
+  rm "$PID_FILE"
+  log "Daemon stopped."
+}
+
+# Install as a macOS service
+install_service() {
+  # Create a launchd plist file
+  PLIST_FILE="$HOME/Library/LaunchAgents/com.windsurfd.autoexec.plist"
+  cat > "$PLIST_FILE" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.windsurfd.autoexec</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$0</string>
+    <string>start</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+EOF
+
+  # Load the service
+  if ! launchctl load "$PLIST_FILE"; then
+    log "Failed to install service."
+    exit 1
+  fi
+  log "Service installed and started."
+}
+
+# Uninstall the macOS service
+uninstall_service() {
+  PLIST_FILE="$HOME/Library/LaunchAgents/com.windsurfd.autoexec.plist"
+  if [ -f "$PLIST_FILE" ]; then
+    if ! launchctl unload "$PLIST_FILE"; then
+      log "Failed to uninstall service."
+      exit 1
+    fi
+    rm "$PLIST_FILE"
+    log "Service uninstalled."
+  else
+    log "Service is not installed."
+  fi
+}
+
+# Help documentation
+show_help() {
+  echo "Usage: windsurfd autoexec [command]"
+  echo "Commands:"
+  echo "  start       Start the AutoExec daemon"
+  echo "  stop        Stop the AutoExec daemon"
+  echo "  install     Install as a macOS service"
+  echo "  uninstall   Uninstall the macOS service"
+  echo "  --help      Show this help message"
+}
+
+# Parse command-line arguments
+case "$1" in
+  start)
+    start_daemon
+    ;;
+  stop)
+    stop_daemon
+    ;;
+  install)
+    install_service
+    ;;
+  uninstall)
+    uninstall_service
+    ;;
+  --help)
+    show_help
+    ;;
+  *)
+    echo "Invalid command. Use 'windsurfd autoexec --help' for usage information."
+    exit 1
+    ;;
+esac
