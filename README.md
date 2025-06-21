@@ -1,5 +1,7 @@
 # Windsurf Daemon (windsurfd)
 
+This has been depreciated as of late 2024 due to better built-in windsurf tooling (finally)
+
 A daemon process that monitors and automatically executes commands in specified directories.
 
 ## Quick Start Guide
